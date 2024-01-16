@@ -30,7 +30,7 @@ def main(
         top_p (float, optional): The top-p sampling parameter for controlling diversity in generation.
             Defaults to 0.9.
         max_seq_len (int, optional): The maximum sequence length for input prompts. Defaults to 512.
-        max_batch_size (int, optional): The maximum batch size for generating sequences. Defaults to 8.
+        batch_size (int, optional): The maximum batch size for generating sequences. Defaults to 8.
         max_gen_len (int, optional): The maximum length of generated sequences. If None, it will be
             set to the model's max sequence length. Defaults to None.
     """
@@ -38,7 +38,7 @@ def main(
         ckpt_dir=ckpt_dir,
         tokenizer_path=tokenizer_path,
         max_seq_len=max_seq_len,
-        max_batch_size=max_batch_size,
+        batch_size=max_batch_size,
     )
 
     dialogs: List[Dialog] = [
@@ -86,14 +86,19 @@ If a question does not make any sense, or is not factually coherent, explain why
             }
         ],
     ]
+
+    input_dialogs = [dialogs[2]]
+
+    # print(input_dialogs[0])
+
     results = generator.chat_completion(
-        [dialogs[0]],  # type: ignore
+        input_dialogs,  # type: ignore
         max_gen_len=max_gen_len,
         temperature=temperature,
         top_p=top_p,
     )
 
-    for dialog, result in zip(dialogs, results):
+    for dialog, result in zip(input_dialogs, results):
         for msg in dialog:
             print(f"{msg['role'].capitalize()}: {msg['content']}\n")
         print(

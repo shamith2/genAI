@@ -26,7 +26,7 @@ class ModelArgs:
     ffn_dim_multiplier: Optional[float] = None
     norm_eps: float = 1e-5
 
-    max_batch_size: int = 32
+    batch_size: int = 32
     max_seq_len: int = 2048
 
 
@@ -100,7 +100,7 @@ def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0):
     t = torch.arange(end, device=freqs.device)  # type: ignore
     freqs = torch.outer(t, freqs).float()  # type: ignore
     
-    torch.save(freqs, os.path.join(save_dir, 'freqs_off.pt'))
+    # torch.save(freqs, os.path.join(save_dir, 'freqs_off.pt'))
     
     freqs_cis = torch.polar(torch.ones_like(freqs), freqs)  # complex64
     return freqs_cis
@@ -160,7 +160,7 @@ def apply_rotary_emb(
     freqs_cis = reshape_for_broadcast(freqs_cis, xq_)
     xq_out = torch.view_as_real(xq_ * freqs_cis).flatten(3)
     xk_out = torch.view_as_real(xk_ * freqs_cis).flatten(3)
-    torch.save(xq_out, os.path.join(save_dir, 'xq_out_real_off.pt'))
+    # torch.save(xq_out, os.path.join(save_dir, 'xq_out_real_off.pt'))
     return xq_out.type_as(xq), xk_out.type_as(xk)
 
 
@@ -231,14 +231,14 @@ class Attention(nn.Module):
             bias=False,
         )
         
-        torch.save(self.wq, os.path.join(save_dir, 'wq_off.pt'))
-        torch.save(self.wk, os.path.join(save_dir, 'wk_off.pt'))
-        torch.save(self.wv, os.path.join(save_dir, 'wv_off.pt'))
-        torch.save(self.wo, os.path.join(save_dir, 'wo_off.pt'))
+        # torch.save(self.wq, os.path.join(save_dir, 'wq_off.pt'))
+        # torch.save(self.wk, os.path.join(save_dir, 'wk_off.pt'))
+        # torch.save(self.wv, os.path.join(save_dir, 'wv_off.pt'))
+        # torch.save(self.wo, os.path.join(save_dir, 'wo_off.pt'))
 
         self.cache_k = torch.zeros(
             (
-                args.max_batch_size,
+                args.batch_size,
                 args.max_seq_len,
                 self.n_local_kv_heads,
                 self.head_dim,
@@ -246,7 +246,7 @@ class Attention(nn.Module):
         )#.cuda()
         self.cache_v = torch.zeros(
             (
-                args.max_batch_size,
+                args.batch_size,
                 args.max_seq_len,
                 self.n_local_kv_heads,
                 self.head_dim,
@@ -275,7 +275,7 @@ class Attention(nn.Module):
         """
         bsz, seqlen, _ = x.shape
         
-        torch.save(x, os.path.join(save_dir, 'x_off.pt'))
+        # torch.save(x, os.path.join(save_dir, 'x_off.pt'))
         
         xq, xk, xv = self.wq(x), self.wk(x), self.wv(x)
 
@@ -283,13 +283,13 @@ class Attention(nn.Module):
         xk = xk.view(bsz, seqlen, self.n_local_kv_heads, self.head_dim)
         xv = xv.view(bsz, seqlen, self.n_local_kv_heads, self.head_dim)
         
-        torch.save(xq, os.path.join(save_dir, 'xq_off.pt'))
-        torch.save(xk, os.path.join(save_dir, 'xk_off.pt'))
+        # torch.save(xq, os.path.join(save_dir, 'xq_off.pt'))
+        # torch.save(xk, os.path.join(save_dir, 'xk_off.pt'))
 
         xq, xk = apply_rotary_emb(xq, xk, freqs_cis=freqs_cis)
         
-        torch.save(xq, os.path.join(save_dir, 'rotary_emb_off_xq.pt'))
-        torch.save(xk, os.path.join(save_dir, 'rotary_emb_off_xk.pt'))
+        # torch.save(xq, os.path.join(save_dir, 'rotary_emb_off_xq.pt'))
+        # torch.save(xk, os.path.join(save_dir, 'rotary_emb_off_xk.pt'))
 
         self.cache_k = self.cache_k.to(xq)
         self.cache_v = self.cache_v.to(xq)
@@ -308,8 +308,8 @@ class Attention(nn.Module):
         keys = keys.transpose(1, 2) # (bs, n_local_heads, cache_len + seqlen, head_dim)
         values = values.transpose(1, 2) # (bs, n_local_heads, cache_len + seqlen, head_dim)
         
-        torch.save(keys, os.path.join(save_dir, 'keys_off.pt'))
-        torch.save(values, os.path.join(save_dir, 'values_off.pt'))
+        # torch.save(keys, os.path.join(save_dir, 'keys_off.pt'))
+        # torch.save(values, os.path.join(save_dir, 'values_off.pt'))
         
         scores = torch.matmul(xq, keys.transpose(2, 3)) / math.sqrt(self.head_dim)
         
@@ -322,12 +322,12 @@ class Attention(nn.Module):
         
         scores = F.softmax(scores.float(), dim=-1).type_as(xq)
         
-        torch.save(scores, os.path.join(save_dir, 'scores_off.pt'))
+        # torch.save(scores, os.path.join(save_dir, 'scores_off.pt'))
         
         output = torch.matmul(scores, values)  # (bs, n_local_heads, seqlen, head_dim)
         output = output.transpose(1, 2).contiguous().view(bsz, seqlen, -1)
         
-        torch.save(output, os.path.join(save_dir, 'attention_out_off.pt'))
+        # torch.save(output, os.path.join(save_dir, 'attention_out_off.pt'))
         
         return self.wo(output)
 
@@ -415,11 +415,11 @@ class TransformerBlock(nn.Module):
         self.layer_id = layer_id
         self.attention_norm = RMSNorm(args.dim, eps=args.norm_eps)
         
-        torch.save(self.attention_norm.weight, os.path.join(save_dir, 'attn_norm_wt_off.pt'))
+        # torch.save(self.attention_norm.weight, os.path.join(save_dir, 'attn_norm_wt_off.pt'))
         
         self.ffn_norm = RMSNorm(args.dim, eps=args.norm_eps)
         
-        torch.save(self.ffn_norm.weight, os.path.join(save_dir, 'ffn_norm_wt_off.pt'))
+        # torch.save(self.ffn_norm.weight, os.path.join(save_dir, 'ffn_norm_wt_off.pt'))
 
     def forward(
         self,
@@ -442,17 +442,17 @@ class TransformerBlock(nn.Module):
 
         """
         
-        torch.save(x, os.path.join(save_dir, 'x_attn_off.pt'))
+        # torch.save(x, os.path.join(save_dir, 'x_attn_off.pt'))
         
         h = x + self.attention.forward(
             self.attention_norm(x), start_pos, freqs_cis, mask
         )
         
-        torch.save(h, os.path.join(save_dir, 'attention_off.pt'))
+        # torch.save(h, os.path.join(save_dir, 'attention_off.pt'))
         
         out = h + self.feed_forward.forward(self.ffn_norm(h))
         
-        torch.save(out, os.path.join(save_dir, 'attention_ffn_off_out.pt'))
+        # torch.save(out, os.path.join(save_dir, 'attention_ffn_off_out.pt'))
         
         return out
 
@@ -488,7 +488,7 @@ class Transformer(nn.Module):
         # torch.save(self.tok_embeddings, os.path.join(save_dir, 'tok_emb_off.pt'))
 
         self.layers = torch.nn.ModuleList()
-        for layer_id in range(2):#params.n_layers):
+        for layer_id in range(params.n_layers):
             self.layers.append(TransformerBlock(layer_id, params))
 
         self.norm = RMSNorm(params.dim, eps=params.norm_eps)
@@ -496,7 +496,7 @@ class Transformer(nn.Module):
             params.dim, params.vocab_size, bias=False,
         )
         
-        torch.save(self.output, os.path.join(save_dir, 'ffn_lin_out_off.pt'))
+        # torch.save(self.output, os.path.join(save_dir, 'ffn_lin_out_off.pt'))
 
         self.freqs_cis = precompute_freqs_cis(
             # Note that self.params.max_seq_len is multiplied by 2 because the token limit for the Llama 2 generation of models is 4096. 
@@ -519,17 +519,15 @@ class Transformer(nn.Module):
         """
         _bsz, seqlen = tokens.shape
         
-        # print(tokens)
-        
-        torch.save(tokens, os.path.join(save_dir, 'tok_off.pt'))
+        # torch.save(tokens, os.path.join(save_dir, 'tok_off.pt'))
         
         h = self.tok_embeddings(tokens)       
-        torch.save(h, os.path.join(save_dir, 'h_off.pt'))
+        # torch.save(h, os.path.join(save_dir, 'h_off.pt'))
         
         self.freqs_cis = self.freqs_cis.to(h.device)
-        torch.save(self.freqs_cis, os.path.join(save_dir, 'self_freqs_cis_off.pt'))
+        # torch.save(self.freqs_cis, os.path.join(save_dir, 'self_freqs_cis_off.pt'))
         freqs_cis = self.freqs_cis[start_pos : start_pos + seqlen]
-        torch.save(freqs_cis, os.path.join(save_dir, 'freqs_cis_off.pt'))
+        # torch.save(freqs_cis, os.path.join(save_dir, 'freqs_cis_off.pt'))
 
         mask = None
         if seqlen > 1:
@@ -549,9 +547,9 @@ class Transformer(nn.Module):
             ]).type_as(h)
 
         for i, layer in enumerate(self.layers):
-            torch.save(h, os.path.join(save_dir, 'h_off_' + str(i) + '.pt'))
+            # torch.save(h, os.path.join(save_dir, 'h_off_' + str(i) + '.pt'))
             h = layer(h, start_pos, freqs_cis, mask)
-            torch.save(h, os.path.join(save_dir, 'llama2_off_' + str(i) + '.pt'))
+            # torch.save(h, os.path.join(save_dir, 'llama2_off_' + str(i) + '.pt'))
 
         h = self.norm(h)
 

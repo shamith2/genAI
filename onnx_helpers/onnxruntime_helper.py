@@ -117,10 +117,10 @@ class ONNXInference:
         # Export the model to ONNX
         if self.use_external_data:
             # onnx_model_path_p = os.path.join(self.fp32_onnx_dir, self.model_name + '_partial.onnx')
-            onnx_model_path_p = os.path.join(os.path.expanduser('~'), 'IPU', 'llama2', 'partial', self.model_name + '_partial.onnx')
+            onnx_model_path_p = os.path.join(os.path.expanduser('~'), 'IPU', 'gen_ai', 'llama2', 'model', 'partial', self.model_name + '_partial.onnx')
 
         # onnx_model_path = os.path.join(self.fp32_onnx_dir, self.model_name + '.onnx')
-        onnx_model_path = os.path.join(os.path.expanduser('~'), 'IPU', 'llama2', self.model_name + '.onnx')
+        onnx_model_path = os.path.join(os.path.expanduser('~'), 'IPU', 'gen_ai', 'llama2', 'model', self.model_name + '.onnx')
         
         if pass_inputs and model_inputs is None:
             raise Exception("Input cannot be None")

@@ -11,8 +11,14 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from llama2 import ModelArgs, Transformer
-# from llama.model import ModelArgs, Transformer
+import onnx
+import onnxruntime as ort
+
+import sys
+sys.path.append(os.path.join(os.path.expanduser('~'), 'IPU', 'gen_ai'))
+
+# from llama2 import ModelArgs, Transformer
+from llama.model import ModelArgs, Transformer
 from llama.tokenizer import Tokenizer
 
 Role = Literal["system", "user", "assistant"]
@@ -50,7 +56,7 @@ class Llama:
         ckpt_dir: str,
         tokenizer_path: str,
         max_seq_len: int,
-        max_batch_size: int,
+        batch_size: int,
         model_parallel_size: Optional[int] = None,
         seed: int = 1,
     ) -> "Llama":
@@ -61,7 +67,7 @@ class Llama:
             ckpt_dir (str): Path to the directory containing checkpoint files.
             tokenizer_path (str): Path to the tokenizer file.
             max_seq_len (int): Maximum sequence length for input text.
-            max_batch_size (int): Maximum batch size for inference.
+            batch_size (int): Maximum batch size for inference.
             model_parallel_size (Optional[int], optional): Number of model parallel processes.
                 If not provided, it's determined from the environment. Defaults to None.
 
@@ -108,7 +114,7 @@ class Llama:
 
         model_args: ModelArgs = ModelArgs(
             max_seq_len=max_seq_len,
-            max_batch_size=max_batch_size,
+            batch_size=batch_size,
             **params,
         )
         tokenizer = Tokenizer(model_path=tokenizer_path)
@@ -155,7 +161,7 @@ class Llama:
         """
         params = self.model.params
         bsz = len(prompt_tokens)
-        assert bsz <= params.max_batch_size, (bsz, params.max_batch_size)
+        assert bsz <= params.batch_size, (bsz, params.batch_size)
 
         min_prompt_len = min(len(t) for t in prompt_tokens)
         max_prompt_len = max(len(t) for t in prompt_tokens)
@@ -173,43 +179,40 @@ class Llama:
         eos_reached = torch.tensor([False] * bsz)
         input_text_mask = tokens != pad_id
 
-        n_layers = 32
-        cache_k = [torch.zeros((params.max_batch_size, params.n_kv_heads, 0, params.dim // params.n_heads))] * n_layers
-        cache_v = [torch.zeros((params.max_batch_size, params.n_kv_heads, 0, params.dim // params.n_heads))] * n_layers
+        # n_layers = params.n_layers
+        # cache_k = [torch.zeros((params.batch_size, params.n_kv_heads, 0, params.dim // params.n_heads))] * n_layers
+        # cache_v = [torch.zeros((params.batch_size, params.n_kv_heads, 0, params.dim // params.n_heads))] * n_layers
         
         # save_dir = os.path.join(os.path.expanduser('~'), 'IPU', 'gen_ai', 'llama2', 'model_debug')
         
         __export = False
         if __export:
-            import sys
-            sys.path.append(os.path.join(os.path.expanduser('~'), 'IPU', 'gen_ai'))
             from onnx_helpers.onnxruntime_helper import ONNXInference
             
             model_inputs = (tokens[:, 0:min_prompt_len], torch.arange(0, min_prompt_len, dtype=torch.int), cache_k, cache_v)
             input_names = ['input_tokens', 'indices'] + ['cache_k' + str(i) for i in range(n_layers)] + ['cache_v' + str(i) for i in range(n_layers)]
             output_names = ['logits'] + ['cache_k' + str(i) for i in range(n_layers)] + ['cache_v' + str(i) for i in range(n_layers)]
-            input_dynamic_axes = [{0: "max_batch_size", 1: "max_seq_len"}, {0: "max_seq_len"}] + [{0: "max_batch_size", 2: "max_seq_len"}] * n_layers * 2
-            output_dynamic_axes = [{0: "max_batch_size", 1: "max_seq_len"}] + [{0: "max_batch_size", 2: "max_seq_len"}] * n_layers * 2
+            input_dynamic_axes = [{0: "batch_size", 1: "max_seq_len"}, {0: "max_seq_len"}] + [{0: "batch_size", 2: "max_seq_len"}] * n_layers * 2
+            output_dynamic_axes = [{0: "batch_size", 1: "max_seq_len"}] + [{0: "batch_size", 2: "max_seq_len"}] * n_layers * 2
             
             # print(model_inputs, input_names, output_names, input_dynamic_axes, output_dynamic_axes)
     
             ort_inf = ONNXInference(model_name='llama2_7b_chat_onnx')
             ort_inf.convert_torch_to_onnx(self.model, pass_inputs=True, model_inputs=model_inputs, input_names=input_names, output_names=output_names, input_dynamic_axes=input_dynamic_axes, output_dynamic_axes=output_dynamic_axes, opset_version=17, use_external_data=False, exists_ok=False)
             
-            # ort_inf.convert_torch_to_onnx(self.model, pass_inputs=True, model_inputs=(tokens[:, 0:min_prompt_len], torch.arange(0, min_prompt_len, dtype=torch.int), cache_k, cache_v), input_names=['input_tokens', 'indices', 'cache_k', 'cache_v'], output_names=['logits', 'cache_k', 'cache_v'], input_dynamic_axes=[{0: "max_batch_size", 1: "max_seq_len"}, {0: "max_seq_len"}, {0: "max_batch_size", 2: "max_seq_len"}, {0: "max_batch_size", 2: "max_seq_len"}], output_dynamic_axes=[{0: "max_batch_size", 1: "max_seq_len"}, {0: "max_batch_size", 2: "max_seq_len"}, {0: "max_batch_size", 2: "max_seq_len"}], opset_version=17, use_external_data=False, exists_ok=False)
-            # ort_inf.convert_torch_to_onnx(self.model, pass_inputs=True, model_inputs=(tokens[:, 0:min_prompt_len], cache_k, cache_v), input_names=['input_tokens', 'cache_k', 'cache_v'], output_names=['logits', 'cache_k', 'cache_v'], input_dynamic_axes=[{0: "max_batch_size", 1: "max_seq_len"}, {0: "max_batch_size", 2: "max_seq_len"}, {0: "max_batch_size", 2: "max_seq_len"}], output_dynamic_axes=[{0: "max_batch_size", 1: "max_seq_len"}, {0: "max_batch_size", 2: "max_seq_len"}, {0: "max_batch_size", 2: "max_seq_len"}], opset_version=17, use_external_data=False, exists_ok=False)
+            # ort_inf.convert_torch_to_onnx(self.model, pass_inputs=True, model_inputs=(tokens[:, 0:min_prompt_len], torch.arange(0, min_prompt_len, dtype=torch.int), cache_k, cache_v), input_names=['input_tokens', 'indices', 'cache_k', 'cache_v'], output_names=['logits', 'cache_k', 'cache_v'], input_dynamic_axes=[{0: "batch_size", 1: "max_seq_len"}, {0: "max_seq_len"}, {0: "batch_size", 2: "max_seq_len"}, {0: "batch_size", 2: "max_seq_len"}], output_dynamic_axes=[{0: "batch_size", 1: "max_seq_len"}, {0: "batch_size", 2: "max_seq_len"}, {0: "batch_size", 2: "max_seq_len"}], opset_version=17, use_external_data=False, exists_ok=False)
+            # ort_inf.convert_torch_to_onnx(self.model, pass_inputs=True, model_inputs=(tokens[:, 0:min_prompt_len], cache_k, cache_v), input_names=['input_tokens', 'cache_k', 'cache_v'], output_names=['logits', 'cache_k', 'cache_v'], input_dynamic_axes=[{0: "batch_size", 1: "max_seq_len"}, {0: "batch_size", 2: "max_seq_len"}, {0: "batch_size", 2: "max_seq_len"}], output_dynamic_axes=[{0: "batch_size", 1: "max_seq_len"}, {0: "batch_size", 2: "max_seq_len"}, {0: "batch_size", 2: "max_seq_len"}], opset_version=17, use_external_data=False, exists_ok=False)
             # ort_inf.convert_torch_to_onnx(self.model, pass_inputs=True, model_inputs=(tokens[:, 0:min_prompt_len], torch.arange(0, min_prompt_len, dtype=torch.int), tuple(cache_k), tuple(cache_v)), input_names=input_names, use_dynamo=True, exists_ok=False)
 
             sys.exit()
         
-        import onnxruntime as ort
-        ort_session = ort.InferenceSession(
-                        os.path.join(os.path.expanduser('~'), 'IPU', 'gen_ai', 'llama2', 'llama2_7b_chat_onnx.onnx'),
-                        providers=['CPUExecutionProvider']
-                    )
+        # ort_session = ort.InferenceSession(
+        #                os.path.join(os.path.expanduser('~'), 'IPU', 'gen_ai', 'llama2', 'model', 'llama2_7b_chat_onnx.onnx',
+        #                providers=['CPUExecutionProvider']
+        #            )
         
-        inputs = ort_session.get_inputs()
-        outputs = ort_session.get_outputs()
+        # inputs = ort_session.get_inputs()
+        # outputs = ort_session.get_outputs()
         
         if min_prompt_len == total_len:
             logits = self.model.forward(tokens, prev_pos)
@@ -220,40 +223,40 @@ class Llama:
                 ignore_index=pad_id,
             )
         
-        input_dict = {}
+        # input_dict = {}
         
-        keys = [np.zeros((params.max_batch_size, params.n_kv_heads, 0, params.dim // params.n_heads))] * n_layers
-        values = [np.zeros((params.max_batch_size, params.n_kv_heads, 0, params.dim // params.n_heads))] * n_layers
+        # keys = [np.zeros((params.batch_size, params.n_kv_heads, 0, params.dim // params.n_heads))] * n_layers
+        # values = [np.zeros((params.batch_size, params.n_kv_heads, 0, params.dim // params.n_heads))] * n_layers
 
         for i, cur_pos in enumerate(range(min_prompt_len, total_len)):
-            # logits = self.model.forward(tokens[:, prev_pos:cur_pos], prev_pos)
+            logits = self.model.forward(tokens[:, prev_pos:cur_pos], prev_pos)
             # logits, cache_k, cache_v = self.model(tokens[:, prev_pos:cur_pos], torch.arange(prev_pos, cur_pos, dtype=torch.int), cache_k, cache_v)
             # logits = self.model(tokens[:, prev_pos:cur_pos], torch.arange(prev_pos, cur_pos, dtype=torch.int))
             
-            for k, _input in enumerate(inputs):
-                if k == 0:
-                    input_dict[_input.name] = tokens[:, prev_pos:cur_pos].numpy()
+            # for k, _input in enumerate(inputs):
+            #    if k == 0:
+            #         input_dict[_input.name] = tokens[:, prev_pos:cur_pos].numpy()
                 
-                elif k == 1:
-                    input_dict[_input.name] = torch.arange(prev_pos, cur_pos, dtype=torch.int).numpy()
+            #     elif k == 1:
+            #         input_dict[_input.name] = torch.arange(prev_pos, cur_pos, dtype=torch.int).numpy()
             
-                elif k >= 2 and k < 2 + n_layers:
-                    input_dict[_input.name] = keys[k-2].astype(np.float32)
+            #     elif k >= 2 and k < 2 + n_layers:
+            #         input_dict[_input.name] = keys[k-2].astype(np.float32)
                     
-                else:
-                    input_dict[_input.name] = values[k-2-n_layers].astype(np.float32)
+            #     else:
+            #         input_dict[_input.name] = values[k-2-n_layers].astype(np.float32)
             
             # if i == 0:
-            model_outputs = ort_session.run([output.name for output in outputs], input_dict)
+            # model_outputs = ort_session.run([output.name for output in outputs], input_dict)
             
             # else:
             #     logits, kv = ort_session.run([output for output in outputs], {inputs[0].name: tokens[:, prev_pos:cur_pos].numpy(), inputs[1].name: torch.arange(prev_pos, cur_pos, dtype=torch.int).numpy(), inputs[2].name: a.astype(np.float32), inputs[3].name: b.astype(np.float32), inputs[4].name: c.astype(np.float32), inputs[5].name: d.astype(np.float32)})
             
             # logits, cache_k, cache_v = torch.from_numpy(logits), torch.from_numpy(cache_k), torch.from_numpy(cache_v)
             
-            logits = torch.from_numpy(model_outputs[0])           
-            keys = [model_outputs[1:][k] for k in range(n_layers * 2) if k < n_layers]
-            values = [model_outputs[1:][k] for k in range(n_layers * 2) if k >= n_layers]
+            # logits = torch.from_numpy(model_outputs[0])
+            # keys = [model_outputs[1:][k] for k in range(n_layers * 2) if k < n_layers]
+            # values = [model_outputs[1:][k] for k in range(n_layers * 2) if k >= n_layers]
             
             # cache_k, cache_v = np.expand_dims(cache_k, axis=0), np.expand_dims(cache_v, axis=0)
             
