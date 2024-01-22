@@ -40,7 +40,7 @@ def get_correct_type(input_type: str):
         return np.int_
     
     else:
-            return
+        return
             
 def get_random_input(input_shape: (tuple or list), input_type):  
     input_data = np.random.random(input_shape).astype(get_correct_type(re.search(r"\((.*)\)", input_type).group(0)))
@@ -54,7 +54,7 @@ class ONNXInference:
     def __init__(self, model_name: str):
         self.model_name = str(model_name)
     
-        self.workspace = os.path.join(os.path.expanduser('~'), 'IPU', 'onnxruntime')
+        self.workspace = os.path.join(os.path.expanduser('~'), 'IPU', 'gen_ai', 'onnxruntime')
         
         self.config_file_dir = os.path.join(self.workspace, 'config')
         self.xclbin_dir = os.path.join(self.workspace, 'config')
@@ -207,6 +207,7 @@ class ONNXInference:
     def quantize(self, shape_infer: bool = True, external_data_format: bool = False, pass_input: bool = False, data_directory: str = None, image_type: str = None):
         input_model_path = os.path.join(self.fp32_onnx_dir, self.model_name + '.onnx')
         
+        # configure model paths
         if shape_infer:
             infer_model_path = input_model_path.replace('fp32', 'fp32_infer')
             infer_model_path = infer_model_path[:-5] + '_infer.onnx'
@@ -314,8 +315,9 @@ class ONNXInference:
                     return next(self.input_feed, None)
                 
                 else:
-                    return None 
-        
+                    return None
+
+        # shape inference
         if shape_infer:
             from onnxruntime.quantization.shape_inference import quant_pre_process
             
